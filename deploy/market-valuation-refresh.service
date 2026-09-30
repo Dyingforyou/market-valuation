@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh all market valuation index data
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/market-valuation
+Environment=VALUATION_OUTPUT_PATH=/var/www/html/market-valuation/data/valuation.json
+ExecStart=/usr/bin/node /home/admin/market-valuation/scripts/refresh-data.mjs
+TimeoutStartSec=600
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/www/html/market-valuation/data

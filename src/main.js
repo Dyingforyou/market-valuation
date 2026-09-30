@@ -3,7 +3,7 @@ import { LineChart as ELineChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, MarkLineComponent, GraphicComponent, DataZoomComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { createIcons, Search, RefreshCw, Database, Info, LineChart } from 'lucide';
-import data from './data/valuation.json';
+import bundledData from './data/valuation.json';
 import './styles.css';
 import './lookup.css';
 import './thresholds.css';
@@ -19,6 +19,9 @@ const state = { selected: '000300', range: 8, query: '', sort: 'default', lookup
 const app = document.querySelector('#app');
 let chart;
 let lookupChart;
+let data = bundledData;
+let refreshing = false;
+let refreshError = '';
 const API_BASE = '/market-valuation-api';
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 echarts.use([ELineChart, GridComponent, TooltipComponent, MarkLineComponent, GraphicComponent, DataZoomComponent, CanvasRenderer]);
@@ -40,8 +43,9 @@ function render() {
   const item = data.indices.find(x => x.code === state.selected) || data.indices[0];
   const st = stats(item), [label,tone] = zone(st.pct);
   app.innerHTML = `
-    <header class="topbar"><a class="brand" href="#"><span class="brand-mark"><i data-lucide="line-chart"></i></span><span>A股估值温度计<small>MARKET VALUATION</small></span></a><div class="asof"><span class="live-dot"></span>数据截至 ${item.date}</div><button class="icon-button" id="refresh" aria-label="刷新数据" title="刷新数据"><i data-lucide="refresh-cw"></i></button></header>
+    <header class="topbar"><a class="brand" href="#"><span class="brand-mark"><i data-lucide="line-chart"></i></span><span>A股估值温度计<small>MARKET VALUATION</small></span></a><div class="asof"><span class="live-dot"></span>数据截至 ${item.date}</div><button class="icon-button ${refreshing ? 'spinning' : ''}" id="refresh" aria-label="刷新数据" title="获取最新已发布数据" ${refreshing ? 'disabled' : ''}><i data-lucide="refresh-cw"></i></button></header>
     <main>
+      ${refreshError ? `<p role="status" class="lookup-error">${esc(refreshError)}</p>` : ''}
       <section class="intro"><div><p class="eyebrow">CHINA A-SHARE · PE-TTM</p><h1>现在，市场贵不贵？</h1><p>把十个关键宽基放在同一把历史标尺上。估值不预测涨跌，只回答价格处在怎样的位置。</p></div><div class="trust"><i data-lucide="database"></i><div><b>可追溯数据</b><span>官网优先 · 来源逐项标注 · 口径透明</span></div></div></section>
       ${renderLookup()}
       <section class="overview-head"><div><h2>估值全景</h2><span>${data.indices.length} 个关键指数</span></div><label class="search"><i data-lucide="search"></i><input id="search" value="${state.query}" placeholder="筛选下方指数" aria-label="筛选下方指数"></label></section>
@@ -52,7 +56,7 @@ function render() {
         <div id="chart" role="img" aria-label="${item.name}市盈率趋势图"></div>
         <div class="chart-note"><span><i class="dot pe"></i>PE-TTM 趋势</span><span><i class="dot lowline"></i>历史低位 · 20%</span><span><i class="dot mean"></i>历史中枢 · 50%</span><span><i class="dot highline"></i>历史高位 · 80%</span></div>
       </section>
-      <section class="source-panel"><div><i data-lucide="info"></i><div><h3>数据口径与可信度</h3><p>统一展示滚动市盈率（PE-TTM）。中证系列直接调用中证指数有限公司官网；深市指数末值由国证指数网交叉核验。历史低位与历史高位是所选区间的 20% / 80% 历史分位，不代表投资结论。</p></div></div><a href="https://www.csindex.com.cn/" target="_blank" rel="noreferrer">访问中证指数官网 ↗</a></section>
+      <section class="source-panel"><div><i data-lucide="info"></i><div><h3>数据口径与可信度</h3><p>统一展示滚动市盈率（PE-TTM）。中证系列直接调用中证指数有限公司官网；深证成指和创业板指使用 Tushare 历史序列。不同来源的估值口径可能存在差异。数据在收盘后定时更新，日期以各来源最新交易日为准。历史低位与历史高位是所选区间的 20% / 80% 历史分位，不代表投资结论。</p></div></div><a href="https://www.csindex.com.cn/" target="_blank" rel="noreferrer">访问中证指数官网 ↗</a></section>
     </main><footer>数据仅供研究，不构成投资建议 <span>·</span> 最近生成 ${new Date(data.generatedAt).toLocaleString('zh-CN',{hour12:false})}</footer>`;
   createIcons({icons:{Search,RefreshCw,Database,Info,LineChart}});
   bind(); draw(item, st); drawLookup();
@@ -81,7 +85,7 @@ function bind() {
   document.querySelectorAll('[data-code]').forEach(el=>el.onclick=()=>{state.selected=el.dataset.code;render()});
   document.querySelectorAll('[data-range]').forEach(el=>el.onclick=()=>{state.range=Number(el.dataset.range);render()});
   document.querySelector('#search').oninput=e=>{state.query=e.target.value;document.querySelector('#cards').innerHTML=renderCards();bindCards()};
-  document.querySelector('#refresh').onclick=()=>{const b=document.querySelector('#refresh');b.classList.add('spinning');setTimeout(()=>{b.classList.remove('spinning');alert('本地数据包已是最近一次刷新结果。运行 npm run refresh-data 可重新拉取官网数据。')},550)};
+  document.querySelector('#refresh').onclick=refreshData;
   const lookupInput=document.querySelector('#lookup-input'); let lookupTimer;
   lookupInput.oninput=e=>{state.lookupText=e.target.value;state.lookupSelected=null;clearTimeout(lookupTimer);lookupTimer=setTimeout(()=>searchLookup(state.lookupText),250)};
   bindLookupResults();
@@ -116,4 +120,23 @@ function drawLookup(){
   lookupChart?.dispose();const result=state.lookupResult,el=document.querySelector('#lookup-chart');if(!result||!el)return;lookupChart=echarts.init(el);const metric=result.metric,rows=result.rows,dataRows=rows.map(x=>[`${String(x.trade_date).slice(0,4)}-${String(x.trade_date).slice(4,6)}-${String(x.trade_date).slice(6,8)}`,x[metric]]),t=thresholds(rows,metric);
   lookupChart.setOption({grid:{left:58,right:34,top:30,bottom:92},tooltip:{trigger:'axis',backgroundColor:'#10233d',borderWidth:0,textStyle:{color:'#fff'},formatter:p=>`${fmtDate(p[0].axisValue)}<br/>${esc(result.metricLabel)}　<b>${fmt(p[0].value[1])}</b>`},dataZoom:[{type:'inside',xAxisIndex:0},{type:'slider',xAxisIndex:0,bottom:10,height:28,labelFormatter:value=>fmtDate(value),fillerColor:'rgba(35,116,216,.16)',borderColor:'#d9e2ec',handleStyle:{color:'#fff',borderColor:'#2374d8'}}],xAxis:{type:'time',axisLabel:{color:'#64748b',formatter:v=>fmtDate(v)}},yAxis:{type:'value',name:result.metricLabel,scale:true,axisLabel:{color:'#2374d8'},splitLine:{lineStyle:{color:'#e8edf3'}}},series:[{name:result.metricLabel,type:'line',data:dataRows,showSymbol:false,smooth:.12,lineStyle:{color:'#2374d8',width:2.4},areaStyle:{color:'rgba(35,116,216,.05)'},markLine:{symbol:'none',silent:true,label:{formatter:p=>`${p.name}  ${fmt(p.value)}`,position:'insideEndTop',fontSize:10,padding:[3,6],borderRadius:4},data:[{name:'历史低位 · 20%',yAxis:t.low,lineStyle:{color:'#23866b',type:'dashed',width:1.4},label:{color:'#17644f',backgroundColor:'#e3f3ee'}},{name:'历史中枢 · 50%',yAxis:t.reasonable,lineStyle:{color:'#d6a91c',type:'dashed',width:1.4},label:{color:'#7b5d05',backgroundColor:'#f7f0d7'}},{name:'历史高位 · 80%',yAxis:t.high,lineStyle:{color:'#d64b3d',type:'dashed',width:1.4},label:{color:'#9e3026',backgroundColor:'#f8e5e2'}}]}}]});window.addEventListener('resize',()=>lookupChart.resize(),{once:true})
 }
-render();
+async function refreshData() {
+  if (refreshing) return;
+  refreshing = true;
+  refreshError = '';
+  render();
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}data/valuation.json`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error('数据服务暂不可用');
+    const latest = await response.json();
+    if (!latest.generatedAt || !Array.isArray(latest.indices) || latest.indices.length !== bundledData.indices.length || !bundledData.indices.every(old => latest.indices.some(item => item.code === old.code && Number.isFinite(item.current) && item.current > 0 && Array.isArray(item.series) && item.series.length && item.series.at(-1).d === item.date && item.series.at(-1).pe === item.current))) throw new Error('数据不完整');
+    if (latest.indices.some(item => item.date < data.indices.find(old => old.code === item.code)?.date)) throw new Error('数据日期异常');
+    data = latest;
+  } catch {
+    refreshError = '暂时无法获取最新数据，正在显示上一次有效数据；请稍后刷新。';
+  } finally {
+    refreshing = false;
+    render();
+  }
+}
+refreshData();

@@ -1,0 +1,14 @@
+[Unit]
+Description=Update market valuations after close and retry delayed sources
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 16:30:00 Asia/Shanghai
+OnCalendar=Mon..Fri *-*-* 18:30:00 Asia/Shanghai
+OnCalendar=Mon..Fri *-*-* 22:30:00 Asia/Shanghai
+OnCalendar=*-*-* 08:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=60
+Unit=market-valuation-refresh.service
+
+[Install]
+WantedBy=timers.target
