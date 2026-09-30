@@ -1,0 +1,10 @@
+tushare.txt
+.env
+.env.*
+!.env.example
+*.log
+*.py[cod]
+__pycache__/
+.venv/
+dist/
+node_modules/
